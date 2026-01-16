@@ -2,7 +2,7 @@
 
 import { useIntegrationApp, useIntegrations } from "@integration-app/react";
 import type { Integration as IntegrationAppIntegration } from "@integration-app/sdk";
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { ensureTokenExtractConnection } from "@/lib/get-record-point-token-for-customer";
 
 export function IntegrationList() {
@@ -41,62 +41,6 @@ export function IntegrationList() {
 			setConfiguringKey(null);
 		}
 	};
-
-	// Automatically create token-extract connection if it doesn't exist
-	useEffect(() => {
-		const setupTokenExtractConnection = async () => {
-			// Prevent multiple simultaneous attempts
-			if (
-				isCreatingConnectionRef.current ||
-				hasAttemptedConnectionRef.current
-			) {
-				return;
-			}
-
-			try {
-				// Check if integrations are loaded
-				if (!integrations || integrations.length === 0) {
-					return;
-				}
-
-				// Find the token-extract integration
-				const tokenExtractIntegration = integrations.find(
-					(integration) => integration.key === "token-extract"
-				);
-
-				// Mark that we're attempting to create a connection
-				isCreatingConnectionRef.current = true;
-				hasAttemptedConnectionRef.current = true;
-
-				// Use the service to ensure connection exists
-				const result = await ensureTokenExtractConnection(
-					integrationApp as any,
-					tokenExtractIntegration
-				);
-
-				if (result.success) {
-					// Only refresh if a new connection was created
-					if (result.message === "Connection created successfully") {
-						refresh();
-					}
-				} else {
-					console.error(
-						"Failed to setup token-extract connection:",
-						result.message
-					);
-					// Reset the flag on error so we can retry if needed
-					hasAttemptedConnectionRef.current = false;
-				}
-			} catch (error) {
-				console.error("Failed to setup token-extract connection:", error);
-				hasAttemptedConnectionRef.current = false;
-			} finally {
-				isCreatingConnectionRef.current = false;
-			}
-		};
-
-		setupTokenExtractConnection();
-	}, [integrations, integrationApp, refresh]);
 
 	return (
 		<ul className="space-y-4 mt-8">

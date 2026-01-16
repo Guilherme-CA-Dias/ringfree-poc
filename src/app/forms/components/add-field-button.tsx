@@ -82,7 +82,7 @@ export function AddFieldButton({ recordType, onFieldAdded }: AddFieldButtonProps
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="flex items-center gap-2 bg-primary hover:bg-primary-600 transition-colors">
+        <Button>
           <Plus className="h-4 w-4" />
           Add Field
         </Button>
@@ -157,10 +157,7 @@ export function AddFieldButton({ recordType, onFieldAdded }: AddFieldButtonProps
             </div>
           )}
 
-          <Button 
-            type="submit"
-            className="w-full bg-primary hover:bg-primary-600 transition-colors"
-          >
+          <Button type="submit" className="w-full">
             Add Field
           </Button>
         </form>

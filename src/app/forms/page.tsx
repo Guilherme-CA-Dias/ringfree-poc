@@ -1,381 +1,230 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Select } from "@/components/ui/select"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Plus, Database, GitBranch, Loader2 } from "lucide-react"
-import { DynamicForm } from "./components/dynamic-form"
-import { useIntegrationApp, useIntegrations } from "@integration-app/react"
-import { useAuth } from '@/app/auth-provider'
-import { toast } from "@/components/ui/use-toast"
+import { useState, useEffect } from "react";
+import { Database, GitBranch, Loader2 } from "lucide-react";
+import { useIntegrationApp } from "@integration-app/react";
+import { useAuth, getAuthHeaders } from "@/app/auth-provider";
 
-interface FormDefinition {
-  _id: string
-  formId: string
-  formTitle: string
-  type: 'default' | 'custom'
-  integrationKey?: string
-  createdAt: string
-  updatedAt: string
-}
+export default function SettingsPage() {
+	const integrationApp = useIntegrationApp();
+	const { customerId } = useAuth();
+	const [configuring, setConfiguring] = useState<
+		"dataSource" | "fieldMapping" | null
+	>(null);
+	const [flowRuns, setFlowRuns] = useState<any[]>([]);
+	const [loadingFlowRuns, setLoadingFlowRuns] = useState(false);
 
-interface Connection {
-  key: string
-  name: string
-}
-
-export default function FormsPage() {
-  const [selectedAction, setSelectedAction] = useState('')
-  const [isCreatingForm, setIsCreatingForm] = useState(false)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [newFormData, setNewFormData] = useState({ 
-    name: '', 
-    id: '', 
-    integrationKey: '' 
-  })
-  const [forms, setForms] = useState<FormDefinition[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const integrationApp = useIntegrationApp()
-  const { integrations } = useIntegrations()
-  const { customerId } = useAuth()
-  const [configuring, setConfiguring] = useState<'dataSource' | 'fieldMapping' | null>(null)
-
-  // Fetch forms from MongoDB
+	// Fetch flow runs
   useEffect(() => {
-    const fetchForms = async () => {
-      if (!customerId) return
+		const fetchFlowRuns = async () => {
+			if (!customerId) return;
 
       try {
-        setIsLoading(true)
-        const response = await fetch(`/api/forms?customerId=${customerId}`)
-        
-        if (!response.ok) {
-          const errorText = await response.text()
-          let errorMessage = 'Failed to fetch forms'
-          try {
-            const errorData = JSON.parse(errorText)
-            errorMessage = errorData.error || errorMessage
-          } catch {
-            errorMessage = errorText || errorMessage
-          }
-          throw new Error(errorMessage)
-        }
+				setLoadingFlowRuns(true);
+				const response = await fetch("/api/flow-runs", {
+					headers: getAuthHeaders(),
+				});
 
-        const contentType = response.headers.get('content-type')
-        if (!contentType || !contentType.includes('application/json')) {
-          throw new Error('Response is not JSON')
-        }
-
-        const text = await response.text()
-        if (!text) {
-          throw new Error('Empty response from server')
-        }
-
-        const data = JSON.parse(text)
-        
-        if (!data.forms) {
-          throw new Error('Invalid response format: missing forms array')
-        }
-
-        setForms(data.forms)
-        
-        // Clear selected action if the form no longer exists
-        if (selectedAction && !data.forms.find((f: FormDefinition) => `get-${f.formId}` === selectedAction)) {
-          setSelectedAction('')
+				if (response.ok) {
+					const data = await response.json();
+					setFlowRuns(data.items || data.flowRuns || []);
         }
       } catch (error) {
-        console.error('Error fetching forms:', error)
-        setForms([])
+				console.error("Error fetching flow runs:", error);
       } finally {
-        setIsLoading(false)
-      }
-    }
-    
-    fetchForms()
-  }, [customerId, selectedAction])
+				setLoadingFlowRuns(false);
+			}
+		};
 
-  const handleCreateForm = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!newFormData.integrationKey || !customerId) {
-      return
-    }
-
-    try {
-      setIsCreatingForm(true)
-      const formId = newFormData.id.toUpperCase()
-
-      const response = await fetch('/api/forms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId,
-          formId,
-          formTitle: newFormData.name,
-          integrationKey: newFormData.integrationKey
-        })
-      })
-
-      if (!response.ok) throw new Error('Failed to create form')
-
-      const newForm = await response.json()
-      setForms(prev => [...prev, newForm])
-      setSelectedAction(`get-${formId.toLowerCase()}`)
-      setNewFormData({ name: '', id: '', integrationKey: '' })
-      setIsDialogOpen(false)
-    } catch (error) {
-      console.error('Error creating form:', error)
-    } finally {
-      setIsCreatingForm(false)
-    }
-  }
+		fetchFlowRuns();
+	}, [customerId]);
 
   const handleConfigureDataSource = async () => {
-    console.log('handleConfigureDataSource called')
-    const form = forms.find(f => f.formId === selectedAction.split('-')[1])
-    console.log('Selected form:', form)
-    
-    if (!form) {
-      console.log('No form found, returning')
-      return
-    }
-    
-    // Only require integration key for custom forms
-    if (form.type === 'custom' && !form.integrationKey) {
-      console.log('Custom form requires integration key, returning')
-      return
-    }
+		try {
+			setConfiguring("dataSource");
 
-    try {
-      setConfiguring('dataSource')
-      
-      const dataSourceName = form.type === 'custom' ? 'objects' : selectedAction.replace('get-', '')
-      console.log('dataSourceName:', dataSourceName)
-      const instanceConfig = form.type === 'custom' ? { instanceKey: form.formId } : undefined
+			// Always use "meetings" as the data source name
+			const dataSourceName = "meetings";
       
       // Get the first available connection
-      const connectionsResponse = await integrationApp.connections.find()
-      const firstConnection = connectionsResponse.items?.[0]
+			const connectionsResponse = await integrationApp.connections.find();
+			const firstConnection = connectionsResponse.items?.[0];
       
       if (!firstConnection) {
-        alert('No connections found. Please set up a connection first.')
-        return
+				alert("No connections found. Please set up a connection first.");
+				return;
       }
 
-      // First, open the data source configuration
+			// Open the data source configuration for meetings
       await integrationApp
-        .connection(form.type === 'custom' ? form.integrationKey! : firstConnection.id)
-        .dataSource(dataSourceName, instanceConfig)
-        .openConfiguration()
-      
-      // After configuring data source, create a flow instance for receiving events
-      if (form.type === 'custom') {
-        const flowPull = integrationApp
-          .connection(form.integrationKey)
-          .flow('receive-objects-events', instanceConfig)
-          .get({ autoCreate: true })
-
-        const flowPush = integrationApp
-          .connection(form.integrationKey)
-          .flow('send-object-events', instanceConfig)
-          .get({ autoCreate: true })
-      }
-      
+				.connection(firstConnection.id)
+				.dataSource(dataSourceName)
+				.openConfiguration();
     } catch (error) {
-      console.error("Error configuring data source or creating flow:", error)
+			console.error("Error configuring data source:", error);
     } finally {
-      setConfiguring(null)
+			setConfiguring(null);
     }
-  }
+	};
 
   const handleConfigureFieldMapping = async () => {
-    const form = forms.find(f => f.formId === selectedAction.split('-')[1])
-    if (!form) {
-      console.log('No form found, returning')
-      return
-    }
-    
-    // Only require integration key for custom forms
-    if (form.type === 'custom' && !form.integrationKey) {
-      console.log('Custom form requires integration key, returning')
-      return
-    }
+		try {
+			setConfiguring("fieldMapping");
 
-    try {
-      setConfiguring('fieldMapping')
-      const dataSourceName = form.type === 'custom' ? 'objects' : selectedAction.replace('get-', '')
-      const instanceConfig = form.type === 'custom' ? { instanceKey: form.formId } : undefined
+			// Always use "meetings" as the data source name
+			const dataSourceName = "meetings";
       
       // Get the first available connection
-      const connectionsResponse = await integrationApp.connections.find()
-      const firstConnection = connectionsResponse.items?.[0]
+			const connectionsResponse = await integrationApp.connections.find();
+			const firstConnection = connectionsResponse.items?.[0];
       
       if (!firstConnection) {
-        alert('No connections found. Please set up a connection first.')
-        return
+				alert("No connections found. Please set up a connection first.");
+				return;
       }
 
       await integrationApp
-        .connection(form.type === 'custom' ? form.integrationKey! : firstConnection.id)
-        .fieldMapping(dataSourceName, instanceConfig)
-        .setup()
+				.connection(firstConnection.id)
+				.fieldMapping(dataSourceName)
+				.setup();
 
       await integrationApp
-        .connection(form.type === 'custom' ? form.integrationKey! : firstConnection.id)
-        .fieldMapping(dataSourceName, instanceConfig)
-        .openConfiguration()
+				.connection(firstConnection.id)
+				.fieldMapping(dataSourceName)
+				.openConfiguration();
+		} catch (error) {
+			console.error("Error configuring field mapping:", error);
     } finally {
-      setConfiguring(null)
+			setConfiguring(null);
     }
-  }
+	};
 
   return (
     <div className="container mx-auto py-10 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Record types and configuration</h1>
+				<h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-2">
-          Select a record type or create a new form or <span className="underline">set the data collection and field mapping</span>
+					Configure data source and field mappings for meetings
         </p>
       </div>
-      <div className="flex items-center gap-4">
-        <Select
-          value={selectedAction}
-          onChange={(e) => setSelectedAction(e.target.value)}
-          className="w-full max-w-md pr-8"
-          disabled={isLoading}
-        >
-          <option value="">Select record type</option>
-          {forms.map((form) => {
-            const integrationName = form.type === 'custom' 
-              ? integrations.find(i => i.key === form.integrationKey)?.name 
-              : null;
 
-            return (
-              <option key={form.formId} value={`get-${form.formId}`}>
-                {form.formTitle} {form.type === 'custom' ? `(Custom - ${integrationName})` : ''}
-              </option>
-            );
-          })}
-        </Select>
-
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="flex items-center gap-2 bg-primary hover:bg-primary-600 transition-colors">
-              <Plus className="h-4 w-4" />
-              New Form
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="bg-white dark:bg-gray-950 border-border">
-            <DialogHeader>
-              <DialogTitle className="text-gray-900 dark:text-gray-100">Create New Form</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreateForm} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="integration" className="text-gray-700 dark:text-gray-300">
-                  Integration
-                </Label>
-                <Select
-                  id="integration"
-                  value={newFormData.integrationKey}
-                  onChange={(e) => setNewFormData(prev => ({ 
-                    ...prev, 
-                    integrationKey: e.target.value 
-                  }))}
-                  className="w-full bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-800"
-                  required
-                >
-                  <option value="">Select integration</option>
-                  {integrations.map((integration) => (
-                    <option key={integration.key} value={integration.key}>
-                      {integration.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">
-                  Form Name
-                </Label>
-                <Input
-                  id="name"
-                  value={newFormData.name}
-                  onChange={(e) => setNewFormData(prev => ({ 
-                    ...prev, 
-                    name: e.target.value 
-                  }))}
-                  placeholder="e.g., Projects"
-                  className="bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-800"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="id" className="text-gray-700 dark:text-gray-300">
-                  Form ID
-                </Label>
-                <Input
-                  id="id"
-                  value={newFormData.id}
-                  onChange={(e) => setNewFormData(prev => ({ 
-                    ...prev, 
-                    id: e.target.value 
-                  }))}
-                  placeholder="e.g., PROJ"
-                  className="bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 border-gray-200 dark:border-gray-800"
-                  required
-                  pattern="[A-Za-z]+"
-                  title="Only letters allowed"
-                />
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Only letters, will be converted to uppercase
-                </p>
-              </div>
-              <Button 
-                type="submit" 
-                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-                disabled={isCreatingForm || !newFormData.integrationKey}
-              >
-                {isCreatingForm ? 'Creating...' : 'Create Form'}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {selectedAction && (
-        <div className="flex gap-4">
-          <Button 
+			<div className="flex gap-2">
+				<button
             onClick={handleConfigureDataSource}
-            className="flex items-center gap-2 bg-primary hover:bg-primary-600 transition-colors"
-            disabled={configuring === 'dataSource'}
+					disabled={configuring === "dataSource"}
+					className="px-4 py-2 rounded-md font-medium transition-colors bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-700 dark:hover:text-blue-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            {configuring === 'dataSource' ? (
+					{configuring === "dataSource" ? (
+						<>
               <Loader2 className="h-4 w-4 animate-spin" />
+							Configuring...
+						</>
             ) : (
+						<>
               <Database className="h-4 w-4" />
+							Configure Data Source
+						</>
             )}
-            Configure Data Source
-          </Button>
-          <Button 
+				</button>
+				<button
             onClick={handleConfigureFieldMapping}
-            className="flex items-center gap-2 bg-primary hover:bg-primary-600 transition-colors"
-            disabled={configuring === 'fieldMapping'}
+					disabled={configuring === "fieldMapping"}
+					className="px-4 py-2 rounded-md font-medium transition-colors bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-700 dark:hover:text-blue-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            {configuring === 'fieldMapping' ? (
+					{configuring === "fieldMapping" ? (
+						<>
               <Loader2 className="h-4 w-4 animate-spin" />
+							Configuring...
+						</>
             ) : (
+						<>
               <GitBranch className="h-4 w-4" />
-            )}
-            Configure Field Mapping
-          </Button>
+							Configure Field Mapping
+						</>
+					)}
+				</button>
+			</div>
+
+			{/* Flow Executions Table */}
+			<div className="mt-8">
+				<h2 className="text-2xl font-bold tracking-tight mb-4">
+					Flow Executions
+				</h2>
+				{loadingFlowRuns ? (
+					<div className="flex items-center justify-center py-8">
+						<Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+						<span className="ml-2 text-gray-500">Loading flow runs...</span>
+					</div>
+				) : flowRuns.length === 0 ? (
+					<div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
+						<p className="text-gray-500 dark:text-gray-400">
+							No flow executions found.
+						</p>
+					</div>
+				) : (
+					<div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+						<div className="overflow-x-auto">
+							<table className="w-full">
+								<thead className="bg-gray-50 dark:bg-gray-700">
+									<tr>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+											Flow ID
+										</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+											Status
+										</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+											Started At
+										</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+											Completed At
+										</th>
+									</tr>
+								</thead>
+								<tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+									{flowRuns.map((run: any) => (
+										<tr
+											key={run.id}
+											className="hover:bg-gray-50 dark:hover:bg-gray-700"
+										>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+												{run.flowId || run.id || "N/A"}
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap">
+												<span
+													className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+														run.status === "completed" ||
+														run.status === "success"
+															? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+															: run.status === "failed" ||
+															  run.status === "error"
+															? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+															: run.status === "running"
+															? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+															: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+													}`}
+												>
+													{run.status || "unknown"}
+												</span>
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+												{run.startedAt
+													? new Date(run.startedAt).toLocaleString()
+													: "N/A"}
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+												{run.completedAt
+													? new Date(run.completedAt).toLocaleString()
+													: "N/A"}
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
         </div>
       )}
-
-      {selectedAction && (
-        <DynamicForm recordType={selectedAction} />
-      )}
+			</div>
     </div>
-  )
+	);
 } 
